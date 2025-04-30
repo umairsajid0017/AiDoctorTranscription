@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Real Time Voice Transcriber</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 30px;
+      background-color: #f4f4f4;
+    }
+
+    h1 {
+      margin-bottom: 20px;
+      color: rgb(38, 38, 148);
+    }
+
+    #transcriber-options,
+    #hyperparameters {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 20px;
+      gap: 20px;
+    }
+
+    select,
+    input[type=range] {
+      padding: 5px;
+      font-size: 14px;
+    }
+
+    label {
+      margin-right: 10px;
+    }
+
+
+    #mic-container {
+      position: fixed;
+      bottom: 30px;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 1000;
+    }
+
+    #record-button {
+      pointer-events: all;
+      background-color: #007BFF;
+      border: none;
+      border-radius: 50%;
+      width: 60px;
+      height: 60px;
+      color: white;
+      font-size: 24px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    #record-button.recording {
+      border-radius: 8px;
+      width: auto;
+      padding: 10px 20px;
+      margin-left: auto;
+      margin-right: 30px;
+    }
+
+    #wave {
+      display: none;
+      margin: 20px auto;
+    }
+
+    #wave.active {
+      display: block;
+      width: 100px;
+      height: 20px;
+      background: linear-gradient(90deg, #007BFF 25%, transparent 0) repeat-x;
+      background-size: 50% 100%;
+      animation: wave 1s infinite linear;
+    }
+
+    @keyframes wave {
+      0% {
+        background-position: 0 0;
+      }
+
+      100% {
+        background-position: 100% 0;
+      }
+    }
+
+    .transcript-box {
+      margin: 20px auto;
+      width: 40%;
+      background: white;
+      border: 1px solid #ccc;
+      padding: 15px;
+      border-radius: 5px;
+      text-align: left;
+      min-height: 50px;
+    }
+
+    #prompt-options {
+      display: flex;
+      justify-content: center;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    #user-prompt {
+      width: 100%;
+      max-width: 400px;
+      min-height: 40px;
+      padding: 5px;
+      font-size: 14px;
+      resize: none;
+      overflow: hidden;
+    }
+
+    #hyperparameters {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>Real Time Voice Transcriber</h1>
+
+  <div id="transcriber-options">
+    <label for="transcriber">Select Transcriber:</label>
+    <select id="transcriber">
+      <option value="whisper">OpenAI Whisper</option>
+      <option value="speechmatics">Speechmatics</option>
+    </select>
+  </div>
+
+
+  <div id="prompt-options">
+    <label for="prompt-type">Prompt Type:</label>
+    <select id="prompt-type">
+      <option value="default">Default System Prompt</option>
+      <option value="user">User Input Prompt</option>
+    </select>
+    <textarea id="user-prompt" placeholder="Enter your custom prompt..." style="display:none;"></textarea>
+  </div>
+
+  <div id="hyperparameters">
+    <label for="model">Model:</label>
+    <select id="model">
+      <option value="whisper-1">Whisper-1</option>
+      <option value="gpt-4o-transcribe">gpt-4o-transcribe</option>
+      <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe</option>
+    </select>
+
+    <label for="language">Language:</label>
+    <select id="language">
+      <option value="en">English</option>
+      <option value="fr">French</option>
+      <option value="de">German</option>
+    </select>
+
+    <label for="temperature">Temperature:</label>
+    <input type="range" id="temperature" min="0" max="1" step="0.1" value="0">
+    <span id="temperature-value">0</span>
+  </div>
+
+  <!-- MIC BUTTON CONTAINER -->
+  <div id="mic-container">
+    <button id="record-button">🎤</button>
+  </div>
+
+  <div id="wave"></div>
+
+  <div id="real-time-text" class="transcript-box">Real-time transcript will appear here...</div>
+  <div id="complete-transcript" class="transcript-box" style="display:none;"></div>
+  <div id="dialogue" class="transcript-box" style="display:none;"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/RecordRTC/5.6.2/RecordRTC.js"></script>
+  <script>
+    const RECORD_MS = 5000;
+
+    let recorder = null;
+    let stream = null;
+    let eventSource = null;
+
+    const promptTypeSelect = document.getElementById('prompt-type');
+    const userPromptInput = document.getElementById('user-prompt');
+    const transcriberSelect = document.getElementById('transcriber');
+    const hyperparameters = document.getElementById('hyperparameters');
+    const modelSelect = document.getElementById('model');
+    const languageSelect = document.getElementById('language');
+    const tempSlider = document.getElementById('temperature');
+    const tempValue = document.getElementById('temperature-value');
+    const recordBtn = document.getElementById('record-button');
+    const wave = document.getElementById('wave');
+    const realTimeText = document.getElementById('real-time-text');
+    const completeTranscript = document.getElementById('complete-transcript');
+    const dialogue = document.getElementById('dialogue');
+
+    function updateHyperparamsVisibility() {
+      hyperparameters.style.display =
+        transcriberSelect.value === 'whisper' ? 'flex' : 'none';
+    }
+    transcriberSelect.addEventListener('change', updateHyperparamsVisibility);
+    updateHyperparamsVisibility();
+
+    tempSlider.addEventListener('input', () => {
+      tempValue.textContent = tempSlider.value;
+    });
+
+    promptTypeSelect.addEventListener('change', () => {
+      userPromptInput.style.display = promptTypeSelect.value === 'user' ? 'inline-block' : 'none';
+    });
+
+
+    recordBtn.addEventListener('click', async () => {
+      if (!recorder) {
+        // START RECORDING
+        recordBtn.textContent = 'Stop Recording';
+        recordBtn.classList.add('recording');
+        wave.classList.add('active');
+
+        realTimeText.textContent = '';
+        completeTranscript.textContent = '';
+        dialogue.textContent = '';
+        realTimeText.style.display = 'block';
+        completeTranscript.style.display = 'none';
+        dialogue.style.display = 'none';
+
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          console.error("getUserMedia not supported on this browser.");
+        }
+
+        recorder = RecordRTC(stream, {
+          type: 'audio',
+          recorderType: StereoAudioRecorder,
+          mimeType: 'audio/wav',
+          timeSlice: RECORD_MS,
+          ondataavailable(blob) {
+            const form = new FormData();
+            form.append('audio_data', blob, `chunk-${Date.now()}.wav`);
+            fetch('/upload_audio', { method: 'POST', body: form }).catch(console.error);
+          }
+        });
+
+        recorder.startRecording();
+
+        await fetch('/transcribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            transcriber: transcriberSelect.value,
+            model: modelSelect.value,
+            language: languageSelect.value,
+            temperature: parseFloat(tempSlider.value)
+          })
+        });
+
+        eventSource = new EventSource('/transcribe_stream');
+        eventSource.onmessage = (e) => {
+          if (e.data !== '...') {
+            realTimeText.textContent += e.data + ' ';
+          }
+        };
+
+      } else {
+        // STOP RECORDING
+        recorder.stopRecording();
+        recorder = null;
+
+        stream.getTracks().forEach(t => t.stop());
+        eventSource?.close();
+
+        recordBtn.textContent = '🎤';
+        recordBtn.classList.remove('recording');
+        wave.classList.remove('active');
+
+        realTimeText.style.display = 'none';
+        completeTranscript.style.display = 'block';
+        dialogue.style.display = 'block';
+
+        fetch('/transcription_result')
+          .then(r => r.json())
+          .then(data => {
+            completeTranscript.innerHTML =
+              '<strong>Complete Transcript:</strong><br>' + data.transcription;
+
+            // build /dialogue_transcript URL
+            let url = '/dialogue_transcript';
+            if (promptTypeSelect.value === 'user' && userPromptInput.value.trim()) {
+              const params = new URLSearchParams({
+                user_system_prompt: userPromptInput.value.trim()
+              });
+              url += '?' + params.toString();
+            }
+            return fetch(url);
+
+          })
+          .then(r => r.json())
+          .then(data => {
+            dialogue.innerHTML = '<strong>Dialogue:</strong><br>' +
+              data.dialogue
+                .replace(/(Doctor:)/g, '<strong>$1</strong>')
+                .replace(/(Patient:)/g, '<strong>$1</strong>')
+                .replace(/\n/g, '<br>');
+          })
+          .catch(console.error);
+      }
+    });
+  </script>
+</body>
+
+</html>
