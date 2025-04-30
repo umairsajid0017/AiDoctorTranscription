@@ -266,7 +266,7 @@ def get_dialuge_transcript():
     return jsonify({"dialogue": dialogue.strip()}), 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True, ssl_context=('cert.pem', 'key.pem'))
+    app.run(host="0.0.0.0", port=8000, debug=True, threaded=True, ssl_context=('cert.pem', 'key.pem'))
     # app.run( debug=True, threaded=True)
 
 
